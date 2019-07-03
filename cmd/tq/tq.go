@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/4ever9/tq"
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +17,7 @@ var rootCMD = &cobra.Command{
 	Args:  cobra.RangeArgs(0, 3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		input := ""
-		selector := ""
+		key := ""
 		pipeMode := false
 		if isPipeMode() {
 			s := bufio.NewScanner(os.Stdin)
@@ -39,16 +39,15 @@ var rootCMD = &cobra.Command{
 			input = string(data)
 		}
 
-		selector, value := verifyArgs(args, pipeMode)
+		key, value := verifyArgs(args, pipeMode)
 
 		// decode toml file
-		m := make(map[string]interface{})
-		md, err := toml.Decode(input, &m)
+		tree, err := toml.Load(input)
 		if err != nil {
 			return fmt.Errorf("toml decode: %s", err)
 		}
 
-		ret, err := tq.Handle(m, md, selector, value)
+		ret, err := tq.Handle(tree, key, value)
 		if err != nil {
 			return err
 		}

@@ -1,176 +1,87 @@
 package tq
 
 import (
-	"bytes"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml"
 )
 
-func Handle(m map[string]interface{}, md toml.MetaData, selector, value string) (string, error) {
+func Handle(tree *toml.Tree, key, value string) (string, error) {
 	// check selector and value
-	if selector == "" {
-		printMeta(md)
-		return "", nil
+	if key == "" {
+		return tree.ToTomlString()
 	}
 
 	if value == "" {
-		return fetch(m, selector)
+		v := fmt.Sprintf("%v", tree.Get(key))
+		return v, nil
 	}
 
-	return replace(m, selector, value)
+	return replace(tree, key, value)
 }
 
-func replace(m map[string]interface{}, selector, value string) (string, error) {
-	first, end, err := splitSelectorByEnd(selector)
-	if err != nil {
-		return "", err
+func replace(tree *toml.Tree, key string, value string) (string, error) {
+	v := tree.Get(key)
+	if v == nil {
+		return tree.ToTomlString()
 	}
 
-	ret, err := parse(m, first)
-	if err != nil {
-		return "", err
-	}
-
-	mm := (ret).(map[string]interface{})
-	switch mm[end].(type) {
-	case bool:
-		b, err := strconv.ParseBool(value)
+	switch v.(type) {
+	case string:
+		tree.Set(key, value)
+		return tree.ToTomlString()
+	case int64:
+		i, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return "", err
 		}
-		mm[end] = b
+		tree.Set(key, i)
+		return tree.ToTomlString()
+	case float64:
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return "", err
+		}
+		tree.Set(key, f)
+		return tree.ToTomlString()
 	case []interface{}:
-		value = strings.TrimLeft(value, "[")
-		value = strings.TrimRight(value, "]")
 		arr := strings.Split(value, ",")
-		res := make([]interface{}, 0)
-		for _, a := range arr {
-			a = strings.Trim(a, " ")
-			a = strings.Trim(a, "\"")
-			res = append(res, a)
-		}
-		mm[end] = res
-	default:
-		mm[end] = value
-	}
+		switch v.([]interface{})[0].(type) {
+		case string:
+			tree.Set(key, arr)
+			return tree.ToTomlString()
+		case int64:
+			ia := make([]int64, 0, len(v.([]interface{})))
+			for _, a := range arr {
+				i, err := strconv.ParseInt(a, 10, 64)
+				if err != nil {
+					return "", err
+				}
 
-	return encode(m)
-}
-
-// Parse parses input with regex
-func fetch(m map[string]interface{}, selector string) (string, error) {
-	ret, err := parse(m, selector)
-	if err != nil {
-		return "", err
-	}
-
-	return encode(ret)
-}
-
-func parse(input map[string]interface{}, selector string) (interface{}, error) {
-	m := interface{}(input)
-
-	for {
-		v, s, err := find(m, selector)
-		if err != nil {
-			return nil, err
-		}
-
-		if s == "" {
-			return v, nil
-		}
-
-		m = v
-		selector = s
-	}
-}
-
-func find(m interface{}, selector string) (interface{}, string, error) {
-	first, other, err := splitSelector(selector)
-	if err != nil {
-		return nil, "", err
-	}
-
-	if isArraySelector(first) {
-
-	}
-
-	mm := m.(map[string]interface{})
-	v, ok := mm[first]
-	if !ok {
-		return nil, "", fmt.Errorf("can't find key %s", selector)
-	}
-
-	return v, other, nil
-}
-
-func encode(ret interface{}) (string, error) {
-	switch r := ret.(type) {
-	case map[string]interface{}:
-		w := bytes.NewBuffer(nil)
-		f := toml.NewEncoder(w)
-		if err := f.Encode(ret); err != nil {
-			return "", err
-		}
-
-		return w.String(), nil
-	case []map[string]interface{}:
-		w := bytes.NewBuffer(nil)
-		f := toml.NewEncoder(w)
-		for _, v := range r {
-			if err := f.Encode(v); err != nil {
-				return "", err
+				ia = append(ia, i)
 			}
+
+			tree.Set(key, ia)
+			return tree.ToTomlString()
+		case float64:
+			fa := make([]float64, 0, len(v.([]interface{})))
+			for _, a := range arr {
+				f, err := strconv.ParseFloat(a, 64)
+				if err != nil {
+					return "", err
+				}
+
+				fa = append(fa, f)
+			}
+
+			tree.Set(key, fa)
+			return tree.ToTomlString()
 		}
 
-		return w.String(), nil
-	default:
-		return fmt.Sprintf("%v", ret), nil
+		return tree.ToTomlString()
 	}
 
-}
-
-func printMeta(meta toml.MetaData) {
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	for _, key := range meta.Keys() {
-		fmt.Fprintf(tw, "%s%s\t%s\n",
-			strings.Repeat("    ", len(key)-1), key, meta.Type(key...))
-	}
-	tw.Flush()
-}
-
-func splitSelector(s string) (string, string, error) {
-	if s == "" {
-		return "", "", nil
-	}
-
-	arr := strings.Split(s, ".")
-
-	return arr[0], strings.Join(arr[1:], "."), nil
-}
-
-func splitSelectorByEnd(s string) (string, string, error) {
-	if s == "" {
-		return "", "", nil
-	}
-
-	arr := strings.Split(s, ".")
-	return strings.Join(arr[:len(arr)-1], "."), arr[len(arr)-1], nil
-}
-
-func isArraySelector(s string) bool {
-	if s == "" {
-		return false
-	}
-
-	if s[0] == '[' && s[len(s)-1] == ']' {
-		return true
-	}
-
-	return false
+	return tree.ToTomlString()
 }

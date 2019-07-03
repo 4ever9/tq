@@ -1,6 +1,7 @@
 # This is a TOML document. Boom.
 
 title = "TOML Example"
+number = 2.2
 
 [owner]
 name = "Tom Preston-Werner"
